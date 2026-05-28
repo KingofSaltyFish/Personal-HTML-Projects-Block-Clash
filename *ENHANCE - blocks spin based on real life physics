@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Block Clash</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111827;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      margin: 16px 0 6px;
+    }
+
+    #gameCanvas {
+      background: #0f172a;
+      border: 3px solid #334155;
+      border-radius: 12px;
+    }
+
+    .panel {
+      margin-top: 12px;
+      background: #1f2937;
+      padding: 14px 18px;
+      border-radius: 12px;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    input {
+      width: 130px;
+    }
+
+    #status {
+      margin-top: 8px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Block Clash</h1>
+  <canvas id="gameCanvas" width="700" height="700"></canvas>
+
+  <div id="status">Player 1: choose angle and power</div>
+
+  <div class="panel">
+    <div>
+      <span id="angleText">0°</span>
+    </div>
+
+    <label>
+      Power:
+      <input id="powerSlider" type="range" min="10" max="100" value="60" />
+      <span id="powerText">70</span>
+    </label>
+
+    <button id="confirmButton">Confirm</button>
+    <button id="resetButton">Reset</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    let currentAngle = 0;
+    const powerSlider = document.getElementById("powerSlider");
+    const angleText = document.getElementById("angleText");
+    const powerText = document.getElementById("powerText");
+    const statusText = document.getElementById("status");
+    const confirmButton = document.getElementById("confirmButton");
+    const resetButton = document.getElementById("resetButton");
+
+    const arena = {
+      x: 100,
+      y: 100,
+      size: 500
+    };
+
+    const friction = 0.9835;
+    const stopSpeed = 0.03;
+    const collisionBounce = 0.45;
+    const powerScale = 0.086;
+
+    let inputPlayer = 1;
+    let isMoving = false;
+    let gameOver = false;
+
+    const selectedMoves = {
+      1: null,
+      2: null
+    };
+
+    const players = [
+      {
+        name: "Player 1",
+        x: 190,
+        y: 330,
+        vx: 0,
+        vy: 0,
+        powerUsed: 0,
+        rotation: 0,
+        angularVelocity: 0,
+        size: 30,
+        color: "#3b82f6",
+        eliminated: false
+      },
+      {
+        name: "Player 2",
+        x: 470,
+        y: 330,
+        vx: 0,
+        vy: 0,
+        powerUsed: 0,
+        rotation: 0,
+        angularVelocity: 0,
+        size: 30,
+        color: "#ef4444",
+        eliminated: false
+      }
+    ];
+
+    function resetInputs() {
+      currentAngle = 0;
+      powerSlider.value = 60;
+      angleText.textContent = "0°";
+      powerText.textContent = "60";
+    }
+
+    function randomSpawnPlayers() {
+      const r = players[0].size;
+      const minX = arena.x + r;
+      const maxX = arena.x + arena.size - r - players[0].size;
+      const minY = arena.y + r;
+      const maxY = arena.y + arena.size - r - players[0].size;
+
+      let validSpawn = false;
+
+      while (!validSpawn) {
+        players[0].x = minX + Math.random() * (maxX - minX);
+        players[0].y = minY + Math.random() * (maxY - minY);
+
+        players[1].x = minX + Math.random() * (maxX - minX);
+        players[1].y = minY + Math.random() * (maxY - minY);
+
+        const center1X = players[0].x + players[0].size / 2;
+        const center1Y = players[0].y + players[0].size / 2;
+        const center2X = players[1].x + players[1].size / 2;
+        const center2Y = players[1].y + players[1].size / 2;
+
+        const dx = center2X - center1X;
+        const dy = center2Y - center1Y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance >= 3 * r) {
+          validSpawn = true;
+        }
+      }
+    }
+
+    function resetGame() {
+      arena.x = 100;
+      arena.y = 100;
+      arena.size = 500;
+      randomSpawnPlayers();
+
+      players[0].vx = 0;
+      players[0].vy = 0;
+      players[0].powerUsed = 0;
+      players[0].rotation = 0;
+      players[0].angularVelocity = 0;
+      players[0].eliminated = false;
+
+      players[1].vx = 0;
+      players[1].vy = 0;
+      players[1].powerUsed = 0;
+      players[1].rotation = 0;
+      players[1].angularVelocity = 0;
+      players[1].eliminated = false;
+
+      selectedMoves[1] = null;
+      selectedMoves[2] = null;
+
+      inputPlayer = 1;
+      isMoving = false;
+      gameOver = false;
+      confirmButton.disabled = false;
+      resetInputs();
+      updateStatus();
+    }
+
+    function updateStatus() {
+      if (gameOver) return;
+
+      if (isMoving) {
+        statusText.textContent = "Both players launched!";
+      } else {
+        statusText.textContent = `Player ${inputPlayer}: choose angle and power`;
+      }
+    }
+
+    function drawArena() {
+      ctx.fillStyle = "#1e293b";
+      ctx.fillRect(arena.x, arena.y, arena.size, arena.size);
+
+      ctx.strokeStyle = "#e5e7eb";
+      ctx.lineWidth = 5;
+      ctx.strokeRect(arena.x, arena.y, arena.size, arena.size);
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.fillRect(arena.x + arena.size / 2 - 2, arena.y, 4, arena.size);
+    }
+
+    function drawPlayer(player) {
+      if (player.eliminated) return;
+
+      const centerX = player.x + player.size / 2;
+      const centerY = player.y + player.size / 2;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(player.rotation);
+
+      ctx.fillStyle = player.color;
+      ctx.fillRect(-player.size / 2, -player.size / 2, player.size, player.size);
+
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(-player.size / 2, -player.size / 2, player.size, player.size);
+
+      ctx.restore();
+
+      ctx.fillStyle = "white";
+      ctx.font = "14px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(player.name, player.x + player.size / 2, player.y - 10);
+    }
+
+    function drawAimLine() {
+      if (isMoving || gameOver) return;
+
+      const player = players[inputPlayer - 1];
+      const angle = currentAngle;
+      const power = Number(powerSlider.value);
+      const radians = angle * Math.PI / 180;
+
+      const centerX = player.x + player.size / 2;
+      const centerY = player.y + player.size / 2;
+      const lineLength = Math.max(35, power * 1.1);
+
+      const endX = centerX + Math.cos(radians) * lineLength;
+      const endY = centerY + Math.sin(radians) * lineLength;
+
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(endX, endY);
+      ctx.strokeStyle = "#facc15";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+
+    function confirmMove() {
+      if (isMoving || gameOver) return;
+
+      selectedMoves[inputPlayer] = {
+        angle: currentAngle,
+        power: Number(powerSlider.value)
+      };
+
+      if (inputPlayer === 1) {
+        inputPlayer = 2;
+        resetInputs();
+        updateStatus();
+      } else {
+        launchBothPlayers();
+      }
+    }
+
+    function launchBothPlayers() {
+      for (let i = 0; i < players.length; i++) {
+        const player = players[i];
+        const move = selectedMoves[i + 1];
+        const radians = move.angle * Math.PI / 180;
+
+        player.vx = Math.cos(radians) * move.power * powerScale;
+        player.vy = Math.sin(radians) * move.power * powerScale;
+        player.powerUsed = move.power;
+      }
+
+      selectedMoves[1] = null;
+      selectedMoves[2] = null;
+
+      isMoving = true;
+      confirmButton.disabled = true;
+      updateStatus();
+    }
+
+    function keepPlayersInsideAfterShrink() {
+      const r = players[0].size;
+      const padding = 0.5 * r;
+
+      for (const player of players) {
+        if (player.eliminated) continue;
+
+        if (player.x < arena.x + padding) {
+          player.x = arena.x + padding;
+        }
+
+        if (player.x + player.size > arena.x + arena.size - padding) {
+          player.x = arena.x + arena.size - padding - player.size;
+        }
+
+        if (player.y < arena.y + padding) {
+          player.y = arena.y + padding;
+        }
+
+        if (player.y + player.size > arena.y + arena.size - padding) {
+          player.y = arena.y + arena.size - padding - player.size;
+        }
+      }
+    }
+
+    function updatePhysics() {
+      if (gameOver) return;
+
+      let stillMoving = false;
+
+      for (const player of players) {
+        player.x += player.vx;
+        player.y += player.vy;
+
+        player.vx *= friction;
+        player.vy *= friction;
+        player.rotation += player.angularVelocity;
+        player.angularVelocity *= 0.978;
+
+        if (Math.abs(player.vx) < stopSpeed) player.vx = 0;
+        if (Math.abs(player.vy) < stopSpeed) player.vy = 0;
+        if (Math.abs(player.angularVelocity) < 0.002) player.angularVelocity = 0;
+
+
+        if (Math.abs(player.vx) > 0 || Math.abs(player.vy) > 0 || Math.abs(player.angularVelocity) > 0) {
+          stillMoving = true;
+        }
+      }
+
+      if (isMoving && !stillMoving) {
+        isMoving = false;
+
+        const shrinkAmount = players[0].size * 0.5;
+        arena.x += shrinkAmount;
+        arena.y += shrinkAmount;
+        arena.size -= shrinkAmount * 2;
+        keepPlayersInsideAfterShrink();
+
+        inputPlayer = 1;
+        confirmButton.disabled = false;
+        resetInputs();
+        updateStatus();
+      }
+    }
+
+    function checkSquareCollision() {
+      const a = players[0];
+      const b = players[1];
+
+      if (a.eliminated || b.eliminated) return;
+
+      const aLeft = a.x;
+      const aRight = a.x + a.size;
+      const aTop = a.y;
+      const aBottom = a.y + a.size;
+
+      const bLeft = b.x;
+      const bRight = b.x + b.size;
+      const bTop = b.y;
+      const bBottom = b.y + b.size;
+
+      if (aRight > bLeft && aLeft < bRight && aBottom > bTop && aTop < bBottom) {
+        const overlapX = Math.min(aRight - bLeft, bRight - aLeft);
+        const overlapY = Math.min(aBottom - bTop, bBottom - aTop);
+
+        const powerDiff = Math.abs(a.powerUsed - b.powerUsed);
+        const bigPowerGap = powerDiff >= 28;
+
+        function addSpin(axis) {
+          const aCenterX = a.x + a.size / 2;
+          const aCenterY = a.y + a.size / 2;
+          const bCenterX = b.x + b.size / 2;
+          const bCenterY = b.y + b.size / 2;
+
+          const relativeVx = a.vx - b.vx;
+          const relativeVy = a.vy - b.vy;
+          const impactStrength = Math.sqrt(relativeVx * relativeVx + relativeVy * relativeVy);
+
+          if (axis === "x") {
+            const offset = (bCenterY - aCenterY) / a.size;
+            const spin = offset * impactStrength * 0.04;
+            a.angularVelocity -= spin;
+            b.angularVelocity -= spin;
+          }
+
+          if (axis === "y") {
+            const offset = (bCenterX - aCenterX) / a.size;
+            const spin = offset * impactStrength * 0.04;
+            a.angularVelocity += spin;
+            b.angularVelocity += spin;
+          }
+        }
+
+        function powerBiasedHit(axis) {
+          const aIsStronger = a.powerUsed > b.powerUsed;
+          const bIsStronger = b.powerUsed > a.powerUsed;
+          const advantage = Math.min(0.75, powerDiff / 90);
+
+          if (axis === "x") {
+            const direction = a.x < b.x ? 1 : -1;
+            const aSpeed = Math.abs(a.vx);
+            const bSpeed = Math.abs(b.vx);
+            const baseHit = Math.max(aSpeed, bSpeed, 1.28);
+
+            if (bigPowerGap && aIsStronger) {
+              a.vx = -direction * baseHit * 0.22;
+              b.vx = direction * baseHit * (0.68 + advantage * 0.72);
+            } else if (bigPowerGap && bIsStronger) {
+              b.vx = direction * baseHit * 0.22;
+              a.vx = -direction * baseHit * (0.68 + advantage * 0.72);
+            } else {
+              const tempVx = a.vx;
+              a.vx = b.vx * collisionBounce;
+              b.vx = tempVx * collisionBounce;
+            }
+          }
+
+          if (axis === "y") {
+            const direction = a.y < b.y ? 1 : -1;
+            const aSpeed = Math.abs(a.vy);
+            const bSpeed = Math.abs(b.vy);
+            const baseHit = Math.max(aSpeed, bSpeed, 1.28);
+
+            if (bigPowerGap && aIsStronger) {
+              a.vy = -direction * baseHit * 0.22;
+              b.vy = direction * baseHit * (0.68 + advantage * 0.72);
+            } else if (bigPowerGap && bIsStronger) {
+              b.vy = direction * baseHit * 0.22;
+              a.vy = -direction * baseHit * (0.68 + advantage * 0.72);
+            } else {
+              const tempVy = a.vy;
+              a.vy = b.vy * collisionBounce;
+              b.vy = tempVy * collisionBounce;
+            }
+          }
+        }
+
+        if (overlapX < overlapY) {
+          if (a.x < b.x) {
+            a.x -= overlapX / 2;
+            b.x += overlapX / 2;
+          } else {
+            a.x += overlapX / 2;
+            b.x -= overlapX / 2;
+          }
+
+          addSpin("x");
+          powerBiasedHit("x");
+        } else {
+          if (a.y < b.y) {
+            a.y -= overlapY / 2;
+            b.y += overlapY / 2;
+          } else {
+            a.y += overlapY / 2;
+            b.y -= overlapY / 2;
+          }
+
+          addSpin("y");
+          powerBiasedHit("y");
+        }
+      }
+    }
+
+    function checkOutOfBounds() {
+      if (gameOver) return;
+
+      for (let i = 0; i < players.length; i++) {
+        const player = players[i];
+        const centerX = player.x + player.size / 2;
+        const centerY = player.y + player.size / 2;
+
+        const halfOutside =
+          centerX < arena.x ||
+          centerX > arena.x + arena.size ||
+          centerY < arena.y ||
+          centerY > arena.y + arena.size;
+
+        if (halfOutside) {
+          const winner = i === 0 ? "Player 2" : "Player 1";
+          player.eliminated = true;
+          player.vx = 0;
+          player.vy = 0;
+          statusText.textContent = `${winner} wins!`;
+          gameOver = true;
+          isMoving = false;
+          confirmButton.disabled = true;
+        }
+      }
+    }
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawArena();
+      drawAimLine();
+
+      updatePhysics();
+      checkSquareCollision();
+      checkOutOfBounds();
+
+      for (const player of players) {
+        drawPlayer(player);
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    let leftHeld = false;
+    let rightHeld = false;
+    let rotateSpeed = 2;
+
+    function updateAngleControls() {
+      if (isMoving || gameOver) return;
+
+      if (leftHeld) {
+        currentAngle = (currentAngle - rotateSpeed + 360) % 360;
+      }
+
+      if (rightHeld) {
+        currentAngle = (currentAngle + rotateSpeed) % 360;
+      }
+
+      angleText.textContent = `${Math.round(currentAngle)}°`;
+
+      if (leftHeld || rightHeld) {
+        rotateSpeed = Math.min(9, rotateSpeed + 0.08);
+      } else {
+        rotateSpeed = 2;
+      }
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft") {
+        leftHeld = true;
+      }
+
+      if (event.key === "ArrowRight") {
+        rightHeld = true;
+      }
+    });
+
+    document.addEventListener("keyup", (event) => {
+      if (event.key === "ArrowLeft") {
+        leftHeld = false;
+      }
+
+      if (event.key === "ArrowRight") {
+        rightHeld = false;
+      }
+    });
+
+    setInterval(updateAngleControls, 16);
+
+    powerSlider.addEventListener("input", () => {
+      powerText.textContent = powerSlider.value;
+    });
+
+    confirmButton.addEventListener("click", confirmMove);
+    resetButton.addEventListener("click", resetGame);
+
+    resetGame();
+    gameLoop();
+  </script>
+</body>
+</html>
